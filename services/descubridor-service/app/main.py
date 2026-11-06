@@ -1,90 +1,79 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException
 import httpx
-from app.registro import registrar, dar_de_baja
-from app.settings import settings
+import os
 
-round_robin_counters = {}
+app = FastAPI(title="Descubridor Service", version="1.0.0")
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await registrar()
-    yield
-    await dar_de_baja()
-
-app = FastAPI(
-    title="PiShop Cloud - Descubridor Service (P09)",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-CONSUL_URL = getattr(settings, "pishop_consul_url", "http://localhost:8500")
-
-@app.get("/health/live", status_code=status.HTTP_200_OK)
-async def health_live():
-    return {"status": "alive"}
-
-@app.get("/health/ready", status_code=status.HTTP_200_OK)
-async def health_ready():
-    return {"status": "ready"}
-
-@app.get("/health/startup", status_code=status.HTTP_200_OK)
-async def health_startup():
-    return {"status": "started"}
+CONSUL_HOST = os.getenv("CONSUL_HOST", "consul")
+CONSUL_PORT = os.getenv("CONSUL_PORT", "8500")
+CONSUL_URL = f"http://{CONSUL_HOST}:{CONSUL_PORT}"
 
 @app.get("/v1/servicios")
-async def listar_servicios():
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(f"{CONSUL_URL}/v1/agent/services")
-            if response.status_code != 200:
-                raise HTTPException(status_code=502, detail="Error conectando con Consul")
-            
-            services = response.json()
-            # Devolvemos una lista limpia con los nombres de los servicios registrados
-            return [service.get("Service", name) for name, service in services.items()]
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error interno procesando servicios: {str(e)}")
-
-@app.get("/v1/instancias/{service_name}")
-async def listar_instancias(service_name: str):
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{CONSUL_URL}/v1/health/service/{service_name}?passing=true")
+def listar_servicios():
+    """Obtiene la lista completa de servicios registrados en Consul"""
+    try:
+        url = f"{CONSUL_URL}/v1/catalog/services"
+        response = httpx.get(url)
         if response.status_code != 200:
-            raise HTTPException(status_code=404, detail="Servicio no encontrado o sin instancias")
-        
-        data = response.json()
-        instances = [
-            {
-                "id": entry["Service"]["ID"],
-                "address": entry["Service"]["Address"],
-                "port": entry["Service"]["Port"]
-            }
-            for entry in data
-        ]
-        return instances
+            return {}
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
 
-@app.get("/v1/resolver/{service_name}")
-async def resolver_instancia(service_name: str):
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{CONSUL_URL}/v1/health/service/{service_name}?passing=true")
-        if response.status_code != 200 or not response.json():
-            raise HTTPException(status_code=404, detail="No hay instancias saludables (passing)")
+@app.get("/v1/servicios/{nombre}/instancias")
+def listar_instancias(nombre: str):
+    """Consulta todas las instancias activas de un servicio registrado en Consul"""
+    try:
+        url = f"{CONSUL_URL}/v1/health/service/{nombre}?passing=true"
+        response = httpx.get(url)
+        if response.status_code != 200:
+            raise HTTPException(status_code=404, detail="Servicio no encontrado en Consul")
         
         data = response.json()
-        instances = [
+        instancias = [
             {
-                "id": entry["Service"]["ID"],
-                "address": entry["Service"]["Address"],
-                "port": entry["Service"]["Port"]
+                "id": item["Service"]["ID"],
+                "nombre": item["Service"]["Service"],
+                "direccion": item["Service"]["Address"],
+                "puerto": item["Service"]["Port"]
             }
-            for entry in data
+            for item in data
         ]
+        return {"servicio": nombre, "instancias": instancias}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/v1/servicios/{nombre}/resolver")
+def resolver_servicio(nombre: str):
+    """Resuelve y balancea una instancia activa para el servicio consultado"""
+    try:
+        url = f"{CONSUL_URL}/v1/health/service/{nombre}?passing=true"
+        response = httpx.get(url)
+        if response.status_code != 200 or not response.json():
+            raise HTTPException(status_code=404, detail="No hay instancias disponibles para este servicio")
         
-        if service_name not in round_robin_counters:
-            round_robin_counters[service_name] = 0
-        
-        index = round_robin_counters[service_name] % len(instances)
-        round_robin_counters[service_name] = index + 1
-        
-        return instances[index]
+        # Selección básica de la primera instancia activa (balanceo inicial)
+        instancia = response.json()[0]["Service"]
+        return {
+            "nombre": instancia["Service"],
+            "direccion": instancia["Address"],
+            "puerto": instancia["Port"],
+            "url": f"http://{instancia['Address']}:{instancia['Port']}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health/live")
+def health_live():
+    """Verifica si el contenedor está vivo"""
+    return {"status": "ok"}
+
+@app.get("/health/ready")
+def health_ready():
+    """Verifica si el microservicio está listo para recibir tráfico"""
+    return {"status": "ok"}
+
+@app.get("/health/startup")
+def health_startup():
+    """Verifica si el servicio ha completado su arranque"""
+    return {"status": "ok"}
