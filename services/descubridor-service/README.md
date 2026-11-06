@@ -55,14 +55,18 @@ C:\Users\Usuario\Documents\fundamentos_arquitectura_politecnico-main>docker comp
  ✔ Container fundamentos_arquitectura_politecnico-main-redis-1               Healthy                                1.3s
  ✔ Container fundamentos_arquitectura_politecnico-main-consul-1              Healthy                                1.3s
  ✔ Container fundamentos_arquitectura_politecnico-main-descubridor-service-1 Started                                1.6s
+---------------------------------------------
 2.Endpoint servicios:C:\Users\Usuario>curl http://localhost:8090/v1/servicios
 ["descubridor-service"]
+---------------------------------------------
 3.Resolvedor o Balanceador:C:\Users\Usuario>curl http://localhost:8090/v1/resolver/descubridor-service
 {"id":"descubridor-service-1","address":"descubridor-service","port":8090}
+---------------------------------------------
 4.contenedores de docker activos:CONTAINER ID   IMAGE                                                           COMMAND                  CREATED          STATUS                    PORTS                                         NAMES
 01215e2948b3   fundamentos_arquitectura_politecnico-main-descubridor-service   "uvicorn app.main:ap…"   10 minutes ago   Up 10 minutes             0.0.0.0:8090->8090/tcp, [::]:8090->8090/tcp   fundamentos_arquitectura_politecnico-main-descubridor-service-1
 74f0253a47e2   redis:8-alpine                                                  "docker-entrypoint.s…"   22 minutes ago   Up 22 minutes (healthy)   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp   fundamentos_arquitectura_politecnico-main-redis-1
 622f4cbbf908   hashicorp/consul:1.21                                           "docker-entrypoint.s…"   22 minutes ago   Up 22 minutes (healthy)   0.0.0.0:8500->8500/tcp, [::]:8500->8500/tcp   fundamentos_arquitectura_politecnico-main-consul-1
+---------------------------------------------
 5.Pyton test:PS C:\Users\Usuario\Documents\fundamentos_arquitectura_politecnico-main> python herramientas/validar_entrega.py descubridor-service
 C:\Users\Usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
   from starlette.testclient import TestClient as TestClient  # noqa
