@@ -95,8 +95,11 @@ C:\Users\Usuario\Documents\fundamentos_arquitectura_politecnico-main>docker comp
 ["descubridor-service"]
 
 3. Resolvedor o Balanceador
-C:\Users\Usuario>curl http://localhost:8090/v1/resolver/descubridor-service
-{"id":"descubridor-service-1","address":"descubridor-service","port":8090}
+PS C:\Users\Usuario\Documents\fundamentos_arquitectura_politecnico-main>  Invoke-RestMethod -Uri "http://localhost:8090/v1/servicios/descubridor-service/resolver"
+
+nombre              direccion           puerto url
+------              ---------           ------ ---
+descubridor-service descubridor-service   8090 http://descubridor-service:8090
 
 4. Contenedores de Docker activos
 CONTAINER ID   IMAGE                                                 COMMAND                  CREATED         STATUS                  PORTS                                           NAMES
@@ -137,3 +140,25 @@ Resumen: {'descubridor-service': 'OK'}
 -Prueba del funcionamiento del sistema en web.
 
 -Pruebas y validaciones con todo en OK sin novedades.
+7. Actualizaciones:
+🛠️ Descubridor Service (Pishop Microservices)
+
+Servicio encargado de la gestión de descubrimiento y resolución de instancias de microservicios utilizando **Consul** como registro central, desarrollado en **FastAPI**.
+
+### 🚀 Características Implementadas
+* **Auto-registro automático:** Al iniciar la aplicación (`startup event`), el servicio se registra automáticamente en Consul utilizando variables de entorno de red de Docker.
+* **Endpoints de Consulta y Resolución:**
+  * `GET /v1/servicios`: Lista todos los servicios registrados en el catálogo de Consul.
+  * `GET /v1/servicios/{nombre}/instancias`: Consulta las instancias activas y saludables de un servicio específico.
+  * `GET /v1/servicios/{nombre}/resolver`: Resuelve y balancea de forma básica una instancia activa para el consumo interno entre microservicios.
+* **Verificaciones de Salud (Health Checks):**
+  * `GET /health/live`
+  * `GET /health/ready`
+  * `GET /health/startup`
+
+### ⚙️ Variables de Entorno Clave
+Para su correcto funcionamiento dentro de la red de Docker, asegúrate de configurar:
+* `CONSUL_HOST`: Host o contenedor de Consul (ej. `consul`).
+* `CONSUL_PORT`: Puerto de Consul (por defecto `8500`).
+* `PISHOP_SERVICE_NAME`: Nombre con el que se registrará el servicio (ej. `descubridor-service`).
+* `PISHOP_HTTP_PORT`: Puerto en el que corre la aplicación (ej. `8090`).
