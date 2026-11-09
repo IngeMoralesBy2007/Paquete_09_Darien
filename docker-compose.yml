@@ -28,7 +28,7 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD en .env}"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD en .env}
     volumes: ["./infra/initdb:/docker-entrypoint-initdb.d:ro"]   # crea pg_catalogo, pg_inventario, pg_pedidos, pg_pagos, pg_notif, pg_reportes
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 5s, retries: 10}
 
@@ -76,14 +76,9 @@ services:
 
   descubridor-service:
     <<: *servicio
-    build: 
-      context: ./services/descubridor-service
-    ports:
-      - "8090:8090"
-    environment:
-      <<: *env
-      PISHOP_SERVICE_NAME: descubridor-service
-      PISHOP_HTTP_PORT: "8090"
+    build: ./services/descubridor-service
+    ports: ["8090:8090"]
+    environment: {<<: *env, PISHOP_SERVICE_NAME: descubridor-service, PISHOP_HTTP_PORT: "8090"}
 
   checkout-bff:
     <<: *servicio
@@ -94,8 +89,5 @@ services:
   api-publica:
     <<: *servicio
     build: ./services/api-publica
-    ports:
-      - "8000:8000"
-    environment:
-      <<: *env
-      PISHOP_API_KEY: "${PISHOP_API_KEY:?defina PISHOP_API_KEY en .env}"
+    ports: ["8000:8000"]
+    environment: {<<: *env, PISHOP_SERVICE_NAME: api-publica, PISHOP_HTTP_PORT: "8000", PISHOP_API_KEY: ${PISHOP_API_KEY:?defina PISHOP_API_KEY en .env}}
