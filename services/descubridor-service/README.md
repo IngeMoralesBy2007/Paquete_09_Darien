@@ -1,62 +1,84 @@
-# 📦 Descubridor Service (Paquete 09) - Pishop
+# Descubridor Service (Paquete 09) - PiShop
 
-Microservicio de descubrimiento de servicios e instanciación, desarrollado con **FastAPI** e integrado con **Consul** como registro centralizado para la arquitectura de microservicios de Pishop.
+Microservicio de descubrimiento de servicios desarrollado con **FastAPI** e integrado con **Consul** (registro centralizado) para la arquitectura de microservicios de PiShop. Puerto: **8090**.
 
----
+## 1. Arquitectura
 
-## 1. Arquitectura y Funcionamiento (Diagrama)
-
-El `descubridor-service` actúa como un intermediario dinámico entre los clientes (BFF / API Pública) y el registro de infraestructura (**Consul**). Permite registrar servicios, consultar instancias activas y balancear el tráfico hacia los contenedores disponibles.
+El `descubridor-service` se registra en Consul al arrancar y expone a los demás servicios (por ejemplo el BFF) la lista de servicios, sus instancias sanas y una instancia resuelta con balanceo round-robin.
 
 ```text
-  +------------------+       GET /v1/servicios/{nombre}/resolver       +------------------+
-  |  Cliente / BFF   | ---------------------------------------------> |  Descubridor     |
-  +------------------+                                                |  (FastAPI:8090)  |
-                                                                      +------------------+
-                                                                               |
-                                                                      Consul Health Check
-                                                                               |
-                                                                               v
-                                                                      +------------------+
-                                                                      |  Consul Server   |
-                                                                      |  (Port: 8500)    |
-                                                                      +------------------+
-Variable de Entorno,Descripción,Valor Predeterminado Local,Docker
-PISHOP_ENV,Entorno de ejecución del microservicio (development / production),development,development
-PISHOP_PORT,Puerto en el que corre la aplicación FastAPI,8090,8090
-CONSUL_HOST,Host o dirección IP donde se encuentra ejecutándose Consul,127.0.0.1 (Local),consul (Docker)
-CONSUL_PORT,Puerto de comunicación con el servidor Consul,8500,8500
+  +--------------+   GET /v1/servicios/{nombre}/resolver   +--------------------+
+  | Cliente/BFF  | --------------------------------------> | descubridor-service|
+  +--------------+                                          |   (FastAPI :8090)  |
+                                                            +--------------------+
+                                                                      |
+                                                    /v1/health/service/{nombre}?passing=true
+                                                                      v
+                                                            +--------------------+
+                                                            |   Consul (:8500)   |
+                                                            +--------------------+
+```
 
-3. Guia de Ejecucion (local)
-Requisitos:
+## 2. Endpoints
 
-Python 3.13 instalado.
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/v1/servicios` | Servicios registrados en Consul |
+| GET | `/v1/servicios/{nombre}/instancias` | Instancias en estado `passing` |
+| GET | `/v1/servicios/{nombre}/resolver` | Una instancia sana, en round-robin (404 si no hay) |
+| GET | `/health/live` | Sonda de vida (no toca dependencias) |
+| GET | `/health/startup` | 200 cuando terminó el arranque |
+| GET | `/health/ready` | 200 si arrancó y Consul responde; 503 en otro caso |
 
-Contenedor de Consul activo (Docker).
+Documentación interactiva en `http://localhost:8090/docs`. La ruta `/` no existe (responde 404).
 
-Pasos para ejecución:
+## 3. Configuración (variables `PISHOP_*`)
 
-Instalar las dependencias del proyecto:
+| Variable | Descripción | Local | Docker |
+|---|---|---|---|
+| `PISHOP_SERVICE_NAME` | Nombre con el que se registra en Consul | `descubridor-service` | `descubridor-service` |
+| `PISHOP_HTTP_PORT` | Puerto HTTP | `8090` | `8090` |
+| `PISHOP_APP_ENV` | Entorno de ejecución | `dev` | `dev` |
+| `PISHOP_CONSUL_URL` | URL de Consul | `http://localhost:8500` | `http://consul:8500` |
+| `PISHOP_HTTP_TIMEOUT_SECONDS` | Timeout de las llamadas a Consul | `2.0` | `2.0` |
 
-Bash
-pip install fastapi uvicorn pydantic httpx pydantic-settings pytest
-Configurar la variable de entorno para la conexión con Consul (en PowerShell):
+## 4. Ejecución
 
-PowerShell
-$env:CONSUL_HOST="127.0.0.1"
-Ejecutar el script de validación integral:
+Con Docker (recomendado):
 
-PowerShell
+```powershell
+docker compose up -d --build descubridor-service
+```
+
+Local (Python 3.13, con Consul levantado en Docker):
+
+```powershell
+pip install -r services/descubridor-service/requirements.txt
+$env:PISHOP_CONSUL_URL="http://localhost:8500"
+cd services/descubridor-service
+uvicorn app.main:app --port 8090
+```
+
+Validación del contrato (desde la raíz del repo):
+
+```powershell
 python herramientas/validar_entrega.py descubridor-service
-4. Decisiones de Diseño y Arquitectura
-Uso de FastAPI: Elegido por su alto rendimiento, validación automática de tipos con Pydantic y su soporte asíncrono nativo idóneo para microservicios.
+```
 
-Integración con Consul (/v1/health/service/{nombre}): Se consumen los endpoints nativos de salud de Consul filtrando por instancias passing=true, lo que garantiza que las llamadas de los clientes nunca rutearán a servicios caídos.
+## 5. Decisiones de diseño
 
-Sondas de Ciclo de Vida (/health/live, /health/ready, /health/startup): Implementadas para integrarse de forma limpia con los orquestadores (como Kubernetes o Docker Compose) y asegurar un control preciso del estado del contenedor.
+- **FastAPI**: validación con Pydantic y documentación automática en `/docs`.
+- **Solo instancias `passing`**: se consulta `/v1/health/service/{nombre}?passing=true`, así nunca se resuelve una instancia caída.
+- **Round-robin**: un contador por servicio rota entre las instancias sanas.
+- **Errores**: Consul inalcanzable responde 503 (dependencia caída); servicio sin instancias sanas responde 404.
+- **Registro automático** en el `lifespan` (`registro.py`: `registrar()` / `dar_de_baja()`), con ID único por instancia para soportar réplicas.
+- **Sondas diferenciadas**: `live` no depende de nada; `ready` verifica Consul.
+- Ver `docs/descubrimiento.md` (descubrimiento del lado del cliente vs. del servidor).
 
-5. Evidencia
-1. Comando docker compose
+## 6. Evidencia
+
+### 1. Comando docker compose
+```text
 C:\Users\Usuario\Documents\fundamentos_arquitectura_politecnico-main>docker compose up -d --build descubridor-service
 [+] Building 1.4s (13/13) FINISHED
  => [internal] load local bake definitions                                                                  0.0s
@@ -89,42 +111,43 @@ C:\Users\Usuario\Documents\fundamentos_arquitectura_politecnico-main>docker comp
  ✔ Container fundamentos_arquitectura_politecnico-main-redis-1             Healthy        1.3s
  ✔ Container fundamentos_arquitectura_politecnico-main-consul-1            Healthy        1.3s
  ✔ Container fundamentos_arquitectura_politecnico-main-descubridor-service-1 Started       1.6s
+```
 
- 2. Endpoint servicios
- C:\Users\Usuario>curl http://localhost:8090/v1/servicios
-["descubridor-service"]
+### 2. Endpoint de servicios
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8090/v1/servicios"
+```
+<pegar aquí la salida real>
 
-3. Resolvedor o Balanceador
-C:\Users\Usuario>curl http://localhost:8090/v1/resolver/descubridor-service
-{"id":"descubridor-service-1","address":"descubridor-service","port":8090}
+### 3. Resolver (round-robin)
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8090/v1/servicios/descubridor-service/resolver"
+```
+<pegar aquí la salida real>
 
-4. Contenedores de Docker activos
+### 4. Contenedores activos
+```text
 CONTAINER ID   IMAGE                                                 COMMAND                  CREATED         STATUS                  PORTS                                           NAMES
 01215e2948b3   fundamentos_arquitectura_politecnico-main-descubridor-service   "uvicorn app.main:ap…"   10 minutes ago  Up 10 minutes           0.0.0.0:8090->8090/tcp, [::]:8090->8090/tcp   fundamentos_arquitectura_politecnico-main-descubridor-service-1
 74f0253a47e2   redis:8-alpine                                        "docker-entrypoint.s…"   22 minutes ago  Up 22 minutes (healthy) 0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp   fundamentos_arquitectura_politecnico-main-redis-1
 622f4cbbf908   hashicorp/consul:1.21                                 "docker-entrypoint.s…"   22 minutes ago  Up 22 minutes (healthy) 0.0.0.0:8500->8500/tcp, [::]:8500->8500/tcp   fundamentos_arquitectura_politecnico-main-consul-1
+```
 
-5. Python test (Validación)
-PS C:\Users\Usuario\Documents\fundamentos_arquitectura_politecnico-main> python herramientas/validar_entrega.py descubridor-service
-C:\Users\Usuario\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
-  from starlette.testclient import TestClient as TestClient  # noqa
+### 5. Validación
+```powershell
+python herramientas/validar_entrega.py descubridor-service
+```
+<pegar aquí la salida real>
 
-== descubridor-service (rol P09, puerto 8090) ==
-  [ok] GET    /v1/servicios
-  [ok] GET    /v1/servicios/{nombre}/instancias
-  [ok] GET    /v1/servicios/{nombre}/resolver
-  [ok] sonda /health/live -> 200
-  [ok] sonda /health/ready -> 200
-  [ok] sonda /health/startup -> 200
-  [ok] sin configuración embebida (0 hallazgos)
+### 6. Consul UI
+<captura de http://localhost:8500 mostrando descubridor-service en passing>
 
-Resumen: {'descubridor-service': 'OK'}
+## 7. Declaración de uso de la IA
 
-6. Declaración de uso de la IA
 Áreas de Asistencia de la IA:
 1. Soporte Arquitectónico y Estructural: Guía en el diseño de los endpoints orientados a la integración con Consul (/v1/servicios, /v1/servicios/{nombre}/instancias, /v1/servicios/{nombre}/resolver) y las sondas de ciclo de vida (/health/live, /health/ready, /health/startup).
 
-2. Depuración y Resolución de Errores: Asistencia en la identificación y corrección de excepciones de entorno y conectividad (NameError y variables de entorno en Windows/PowerShell).
+2. Depuración y Resolución de Errores: Asistencia en la identificación y corrección de excepciones de entorno y conectividad (NameError y variables de entorno en Windows/PowerShell), del manejo de errores (404/503), del registro en el `lifespan`, del round-robin y de los nombres de las variables `PISHOP_*` en `settings.py`.
 
 3. Documentación Técnica: Apoyo en la estructuración y redacción del archivo README.md (diagrama de comunicación, tabla de configuración PISHOP_* y decisiones de diseño).
 
